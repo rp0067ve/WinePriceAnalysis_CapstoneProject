@@ -1,0 +1,805 @@
+---
+title: "Final Project Group A"
+output: html_notebook
+---
+
+# Member
+
+-   Sae Nuruki
+
+-   Saman Chekani Moghaddam
+
+-   Samar Maghsoodi
+
+-   Sidra Bushra
+
+-   Koichiro Suzuki
+
+# Analytical Objectives
+
+-   Retrieving data regarding the wines which has made the most sales globally.
+
+-   Which wine age is more popular with users based on rating.
+
+-   Which harvest region produces the better wine and consequently higher price.
+
+-   Brand names of each wine and their impact on wine price.
+
+# Assumptions
+
+1.  Lower ACD leads to a better wine and therefore higher price and popularity.
+
+2.  Name of the wine irrespective of its quality is an important factor (more famous higher the price)
+
+3.  Wines that are more aged up are costlier compared to ones that are harvested more recently
+
+4.  Higher ratings predominantly means the higher price of each wine.
+
+5.  Lowers rsg often means higher price
+
+6.  Number of testers and alcohol level does not have a significant effect on pricing
+
+7.  BD does not have a noticeable effect on pricing
+
+# Preparation
+
+```{r}
+library(ggplot2);
+```
+
+# Data Import
+
+```{r}
+BurgundySip <- read.csv("~/Documents/DataAnalytics/Module2/Dataset/BurgundySip.csv", na.strings = c("", "NA", "N.V."));
+
+yearRange <- range(BurgundySip$YR, na.rm = T);
+BurgundySip$YR <- factor(BurgundySip$YR, 
+                         levels = yearRange[1]:yearRange[2], 
+                         ordered = T);
+BurgundySip$REG <- as.factor(BurgundySip$REG);
+BurgundySip$TP <- as.factor(BurgundySip$TP);
+BurgundySip$RSG <- as.numeric(gsub(" ", "", BurgundySip$RSG));
+BurgundySip$AL <- as.numeric(gsub(" ", "", BurgundySip$AL));
+BurgundySip$DN <- as.numeric(gsub(" ", "", BurgundySip$DN));
+```
+
+# Data Understanding
+
+## Check the structure
+
+```{r}
+str(BurgundySip);
+```
+
+## Check the summary
+
+```{r}
+summary(BurgundySip);
+```
+
+## Check the correlation
+
+```{r}
+BurgundySipNum <- sapply(BurgundySip[, !sapply(BurgundySip, is.character)], as.numeric);
+heatmap(cor(na.omit(BurgundySipNum)));
+```
+
+# Treating Duplicates
+
+SN is helpful to identify wines.
+
+```{r}
+sum(is.na(BurgundySip$SN)); # 47
+```
+
+There are 47 missing values and we need to fill the blank before starting treating duplicates values
+
+## Step 1. Handle missing values of SN
+
+SN is unique for each wines. And every observations which have same SN are duplicated with other variables excepting for RSG, AL and DN.
+
+We remove the duplicated observations by SN. And fortunately there are only two SNs are missing.
+
+```{r}
+View(BurgundySip[is.na(BurgundySip$SN),]);
+# We can found only 2 atomic observations are missing value of SN.
+# Then we can fill the blank manually.
+BurgundySip$SN[c(727, 730, 733)] <- BurgundySip$SN[c(726)];
+BurgundySip$SN[2072:2115] <- BurgundySip$SN[c(2071)];
+sum(is.na(BurgundySip$SN)); # 0
+```
+
+## Step 2. Aggregate RSG, AL and DN by SN
+
+These 3 variables are slightly different by each duplicated observations. We can select every aggregate methods such as max(), min(), mean() and median().
+
+We use the average for aggregating the records.
+
+```{r}
+RemovingDuplicated <- aggregate(cbind(RSG, AL, DN) ~ SN, 
+                                data = BurgundySip, 
+                                FUN = mean);
+RemovingDuplicated$RSG <- round(RemovingDuplicated$RSG, 4);
+RemovingDuplicated$AL <- round(RemovingDuplicated$AL, 4);
+RemovingDuplicated$DN <- round(RemovingDuplicated$DN, 4);
+```
+
+## Step 3. Impute other variables with non-missing values
+
+We want to merge other variables (excepting for SN, RSG, AL and DN) into the aggregated table. But by entering values appropriately, missing values can be efficiently removed.
+
+We return the first non-NA value of the NAME column of Observations with the corresponding SN.
+
+```{r}
+for (rowIndex in 1:nrow(RemovingDuplicated)) {
+  Duplicated_SN <- subset(BurgundySip, 
+                          SN == RemovingDuplicated[rowIndex, "SN"]);
+  RemovingDuplicated$NAME[rowIndex] <- Duplicated_SN[!is.na(Duplicated_SN$NAME), "NAME"][1];
+  RemovingDuplicated$WINE[rowIndex] <- Duplicated_SN[!is.na(Duplicated_SN$WINE), "WINE"][1];
+  RemovingDuplicated$YR[rowIndex] <- as.character(Duplicated_SN[!is.na(Duplicated_SN$YR), "YR"][1]);
+  RemovingDuplicated$REG[rowIndex] <- as.character(Duplicated_SN[!is.na(Duplicated_SN$REG), "REG"][1]);
+  RemovingDuplicated$TP[rowIndex] <- as.character(Duplicated_SN[!is.na(Duplicated_SN$TP), "TP"][1]);
+  RemovingDuplicated$RT[rowIndex] <- Duplicated_SN[!is.na(Duplicated_SN$RT), "RT"][1];
+  RemovingDuplicated$NUMR[rowIndex] <- Duplicated_SN[!is.na(Duplicated_SN$NUMR), "NUMR"][1];
+  RemovingDuplicated$PR[rowIndex] <- Duplicated_SN[!is.na(Duplicated_SN$PR), "PR"][1];
+  RemovingDuplicated$BD[rowIndex] <- Duplicated_SN[!is.na(Duplicated_SN$BD), "BD"][1];
+  RemovingDuplicated$ACD[rowIndex] <- Duplicated_SN[!is.na(Duplicated_SN$ACD), "ACD"][1];
+}
+BurgundySip <- RemovingDuplicated;
+BurgundySip$YR <- factor(BurgundySip$YR, 
+                         levels = yearRange[1]:yearRange[2], 
+                         ordered = T);
+BurgundySip$REG <- as.factor(BurgundySip$REG);
+BurgundySip$TP <- as.factor(BurgundySip$TP);
+```
+
+# Treating Outliers
+
+A large NUMR does not yield a high RT average.
+
+However, Wines with many testers should be weighted RT by NUMR to consider for their popularity compared to Wines with fewer testers.
+
+```{r}
+# Step1
+# Convert NUMR into Z-score.
+NUMR_Zscores <- (BurgundySip$NUMR - mean(BurgundySip$NUMR)) / sd(BurgundySip$NUMR);
+
+# Step2 
+# Adjust RT with the weight as new variable RT_WEI
+BurgundySip$RT_WEI <- BurgundySip$RT + NUMR_Zscores / 100;
+BurgundySip$RT_WEI <- ifelse(BurgundySip$RT_WEI > 5.0, 5.0, round(BurgundySip$RT_WEI, 2));
+
+# Check how updates
+plot(BurgundySip$NUMR, BurgundySip$RT, main = "Adjust RT as treating Outliers");
+points(BurgundySip[BurgundySip$NUMR > 5000,]$NUMR, BurgundySip[BurgundySip$NUMR > 5000,]$RT_WEI, pch = 16, col = "magenta");
+```
+
+# Treating Missing Values
+
+Let's check the missing values by column.
+
+5 variables are still missing. We challenge these tasks by mainly 3 approaches.
+
+```{r}
+colSums(apply(BurgundySip, 2, FUN = is.na));
+#  SN  RSG   AL   DN NAME WINE   YR  REG   TP   RT NUMR   PR   BD  ACD RT_WEI 
+#   0    0    0    0    0    0  144    0  151    0    0   56  433  433      0
+# There are 5 variables which are still missing.
+# YR: 144
+# TP: 151
+# PR: 56
+# BD: 433
+# ACD: 433
+```
+
+## YR: Year in which the grapes were harvested -- indicator of the AGE of the wine.
+
+### Strategy
+
+```{r}
+# 1. Check the distribution
+plot(BurgundySip$YR);
+# 2. Check the correlation with other variables
+cor(na.omit(BurgundySipNum))[,"YR"];
+#        RSG          AL          DN          YR 
+# 0.50752169 -0.32095274  0.25185578  1.00000000 
+#        REG          TP          RT        NUMR 
+#-0.15951649 -0.02402383 -0.54806420  0.05418860 
+#         PR          BD         ACD 
+#-0.42082790 -0.12789536  0.30873182 
+# From the above result, we can find the moderate correlation variables, RSG, RT and PR
+ggplot(BurgundySip, aes(round(RSG, 1), YR)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", col = "red") + 
+  geom_smooth(method = "loess", col = "blue") + 
+  geom_smooth(col = "green");
+
+
+meanYear_RSG <- aggregate(as.integer(as.character(YR)) ~ round(RSG, 1), BurgundySip, FUN = mean);
+names(meanYear_RSG) <- c("RSG", "YR");
+plot(meanYear_RSG$RSG, meanYear_RSG$YR);
+ggplot(meanYear_RSG, aes(RSG, YR)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", col = "red") + 
+  geom_smooth(method = "loess", col = "blue") + 
+  geom_smooth(method = "gam", col = "orange") + 
+  geom_smooth(method = "glm", col = "green");
+# Please look at the graph. It displays the beautiful quadratic curve.
+# We can predict the year with RSG.
+```
+
+### Step 1. Regression Model Based
+
+Nonlinear Regression suite with this task.
+
+```{r}
+yearPredictModel <- loess(YR ~ RSG, data = meanYear_RSG);
+summary(yearPredictModel);
+# loess(formula = YR ~ RSG, data = meanYear_RSG)
+# Number of Observations: 82 
+# Equivalent Number of Parameters: 4.85 
+# Residual Standard Error: 6.682 
+# Trace of smoother matrix: 5.31  (exact)
+
+missingYR_RSG <- BurgundySip$RSG[is.na(BurgundySip$YR)];
+predictYR <- predict(yearPredictModel, missingYR_RSG);
+missingYR_RSG[which(is.na(predictYR))]; # 15.9014: This value is out of range 
+predictYR[is.na(predictYR)] <- 2021;
+BurgundySip$YR[is.na(BurgundySip$YR)] <- round(predictYR, 0);
+```
+
+## PR: Price in euros [€]
+
+### Strategy
+
+```{r}
+# 1. Check the distribution
+plot(BurgundySip$PR);
+# 2. Check the correlation with other variables
+cor(na.omit(BurgundySipNum))[,"PR"];
+#         YR         REG          TP          RT 
+#-0.41471733  0.06908034  0.02867421  0.64897778 
+#       NUMR          PR          BD         ACD 
+#-0.04091818  1.00000000  0.14725705 -0.04174460 
+#        RSG          AL          DN 
+#-0.52882810  0.34152337 -0.25518207 
+# From the above result, we can find the moderate correlation variables, YR, RT and RSG
+plot(round(BurgundySip$RSG, 1), log(BurgundySip$PR));
+ggplot(BurgundySip, aes(round(RSG, 1), log(PR))) + 
+  geom_point() + 
+  geom_smooth(method = "lm", col = "red") + 
+  geom_smooth(method = "loess", col = "blue") + 
+  geom_smooth(col = "green");
+# Please look at the graph. It displays the beautiful straight line.
+# We can predict the price with RSG.
+```
+
+### Step 1. Regression Model Based
+
+Linear Regression suite with this task.
+
+```{r}
+train_index <- !is.na(BurgundySip$PR) & BurgundySip$RSG < 10;
+train_RSG <- round(BurgundySip$RSG[train_index], 1);
+train_PR <- BurgundySip$PR[train_index];
+pricePredictModel <- lm(log(train_PR) ~ train_RSG);
+coefficients(pricePredictModel);
+# (Intercept)   train_RSG 
+#  10.4689374  -0.7572643 
+
+test_RSG <- BurgundySip$RSG[is.na(BurgundySip$PR)];
+predictPR <- exp(1)^(-0.7572643 * test_RSG + 10.4689374);
+BurgundySip$PR[is.na(BurgundySip$PR)] <- round(predictPR, 0);
+```
+
+## TP: Wine variety
+
+### Strategy
+
+```{r}
+# 1. Check the distribution
+plot(BurgundySip$TP);
+# 2. Check the correlation with other variables
+cor(na.omit(BurgundySipNum))[,"TP"];
+#        RSG          AL          DN          YR 
+#-0.16671515  0.06265274 -0.03792722 -0.02402383 
+#        REG          TP          RT        NUMR 
+# 0.50523265  1.00000000  0.12509236  0.03436571 
+#         PR          BD         ACD 
+# 0.03020858  0.47570761 -0.11705663 
+# From the above result, we can find the moderate correlation variables, REG and BD.
+# There are so many missing values in BD, then filling TP with REG might be good solution.
+heatmap(table(BurgundySip$TP, BurgundySip$REG));
+TP_REG <- table(BurgundySip$TP, BurgundySip$REG);
+```
+
+### Step.1 Year is different, but the name of wine is same
+
+We can fill the missing value by referring other same name wines.
+
+```{r}
+naTP_BurgundySip <- BurgundySip[is.na(BurgundySip$TP), ];
+for (rowIndex in 1:nrow(naTP_BurgundySip)) {
+  Duplicated_WINE <- subset(BurgundySip, WINE == naTP_BurgundySip$WINE[rowIndex]);
+  naTP_BurgundySip$TP[rowIndex] <- Duplicated_WINE$TP[!is.na(Duplicated_WINE$TP)][1];
+}
+BurgundySip$TP[is.na(BurgundySip$TP)] <- naTP_BurgundySip$TP;
+```
+
+### Step.2 Remove Minor wines
+
+Minor wines don't have enough information and they don't affect our analytics results.
+
+```{r}
+naTP_BurgundySip <- BurgundySip[is.na(BurgundySip$TP), ];
+existTP_BurgundySip <- BurgundySip[!is.na(BurgundySip$TP), ];
+
+BurgundySip_with1 <- cbind(BurgundySip, 1);
+names(BurgundySip_with1)[length(names(BurgundySip_with1))] <- "Count";
+countREG <- aggregate(Count ~ REG, BurgundySip_with1, FUN = sum);
+minorWines <- subset(countREG, Count <= 3);
+naTP_BurgundySip <- naTP_BurgundySip[!(naTP_BurgundySip$REG %in% minorWines$REG), ];
+BurgundySip <- rbind(existTP_BurgundySip, naTP_BurgundySip);
+```
+
+### Step.3 Research each type of wine manually
+
+We recognize that these wines which missing the TP are different type of others.
+
+Some of them are new types (such as "Rose", "Dessert", "Fortified" and "Sparkling").
+
+We want to save these precious wines for analysis and decide to get the major type of wine on web.
+
+We assume Major category of wine ("Red", "White", "Rose", "Sparkling" and so on) behave similar with original TP.
+
+We challenge to fill the missing values by researching.
+
+```{r}
+naTP_BurgundySip <- BurgundySip[is.na(BurgundySip$TP), ];
+length(naTP_BurgundySip[!duplicated(naTP_BurgundySip$WINE),]$WINE); # 68
+levels(BurgundySip$TP) <- c(levels(BurgundySip$TP), "White", "Rose", "Dessert", "Fortified");
+
+BurgundySip$TP[BurgundySip$WINE == "Treixadura"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Tintilla de Rota"] <- "Red";
+BurgundySip$TP[BurgundySip$WINE == "Reserva Vermouth Rojo"] <- "Red";
+BurgundySip$TP[BurgundySip$WINE == "Pla dels Angels Rosado"] <- "Rose";
+BurgundySip$TP[BurgundySip$WINE == "Pedra de Guix"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Massipa de Scala Dei Garnatxa Blanca - Xenin"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Cepas Vellas Godello"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Salvaxe"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Le Domaine Blanco de Guarda"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Malvasia"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "No. 2 Victoria"] <- "Dessert";
+BurgundySip$TP[BurgundySip$WINE == "Le Rose"] <- "Sparkling";
+BurgundySip$TP[BurgundySip$WINE == "Tahulla Moscatel Blanco Seco"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Heaven & Hell"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Rosado de Larrainzar"] <- "Rose";
+BurgundySip$TP[BurgundySip$WINE == "Nun Vinya dels Taus"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Ekam Essencia"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Fino La Barajuela"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "O Luar do Sil Valdeorras Godello Sobre Lias"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "San Valentin Parellada"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Nounat"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Blanco"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Dolc Mataro"] <- "Dessert";
+BurgundySip$TP[BurgundySip$WINE == "La Chispa Negra"] <- "Dessert";
+BurgundySip$TP[BurgundySip$WINE == "Godello Blanco"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Gran Reserva Rosado"] <- "Rose";
+BurgundySip$TP[BurgundySip$WINE == "Manar dos Seixas"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Muscat"] <- "Sparkling";
+BurgundySip$TP[BurgundySip$WINE == "Stairway To Heaven Rosado"] <- "Rose";
+BurgundySip$TP[BurgundySip$WINE == "Godello"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Gessami"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "200 Cestos Godello"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Ekam"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "A Pita Cega"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Recondita Armonia Monastrell Dulce"] <- "Dessert";
+BurgundySip$TP[BurgundySip$WINE == "Finca Misenhora Edicion Limitada"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Dolc de L'Obac"] <- "Dessert";
+BurgundySip$TP[BurgundySip$WINE == "As Sortes Val do Bibei Godello"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Vinyes Altes de Les Garrigues Vi Blanc"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Gran Barquero Palo Cortado Solera 25 Anos"] <- "Fortified";
+BurgundySip$TP[BurgundySip$WINE == "Sorte O Soro Val do Bibei"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Fondillon Gran Reserva"] <- "Dessert";
+BurgundySip$TP[BurgundySip$WINE == "Penalba Lopez Blanco"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "El Cuentista"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Adega do Moucho Treixadura"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Vermello Vermu"] <- "Fortified";
+BurgundySip$TP[BurgundySip$WINE == "Nelin Priorat"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Vendimia Tardia Moscatel"] <- "Dessert";
+BurgundySip$TP[BurgundySip$WINE == "Gratallops Escanya-Vella"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "La Revelia Godello"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Branco Vermu"] <- "Fortified";
+BurgundySip$TP[BurgundySip$WINE == "Vi De Glass Gewurztraminer"] <- "Dessert";
+BurgundySip$TP[BurgundySip$WINE == "Molino Real"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Porcellanic VI Xarel-lo Sur Lie"] <- "Dessert";
+BurgundySip$TP[BurgundySip$WINE == "Navarra Vendimia Tardia Coleccion 125"] <- "Dessert";
+BurgundySip$TP[BurgundySip$WINE == "El Rocallis"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Vino de Autor Ribeiro Blanco"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "La Solana Alta"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "La Silleria"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Casta Diva Cosecha Miel Moscatel Dulce"] <- "Dessert";
+BurgundySip$TP[BurgundySip$WINE == "Selma de Nin Blanco"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Selection 1884 Vermouth Gran Reserva"] <- "Fortified";
+BurgundySip$TP[BurgundySip$WINE == "Vallegarcia Viognier"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Louro Godello"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Diables"] <- "Rose";
+BurgundySip$TP[BurgundySip$WINE == "V Dulce de Invierno"] <- "Dessert";
+BurgundySip$TP[BurgundySip$WINE == "Atlantico"] <- "White";
+BurgundySip$TP[BurgundySip$WINE == "Vina de Martin Escolma Ribeiro"] <- "White";
+```
+
+## BD: Body score, defined as the richness and weight of the wine in your mouth [from 1-5]
+
+### Strategy
+
+```{r}
+# 1. Check the distribution
+table(BurgundySip$BD);
+#   2    3    4    5 
+#  34  380 1874  884 
+# 2. Check the correlation with other variables
+cor(na.omit(BurgundySipNum))[,"BD"];
+#        RSG          AL          DN
+#-0.31985032  0.14935454 -0.10624900 
+#         YR         REG          TP          RT 
+#-0.12789536  0.47001416  0.47570761  0.30123444 
+#       NUMR          PR          BD         ACD 
+# 0.09674641  0.17308001  1.00000000 -0.07718933 
+```
+
+### Step.1
+
+From the above result, we can find the moderate correlation variables, RSG, REG and TP.
+
+And especially the following table explain the perfect relationship.
+
+BD and TP have a M to 1 relationship.
+
+```{r}
+table(BurgundySip$BD, BurgundySip$TP);
+bdTPTable <- aggregate(BD ~ TP, BurgundySip, FUN = mean);
+missingBD_BurgundySip <- BurgundySip[is.na(BurgundySip$BD),];
+existingBD_BurgundySip <- BurgundySip[!is.na(BurgundySip$BD),];
+removeBDIndexes <- !(names(BurgundySip) == "BD");
+missingBD_BurgundySip <- merge(missingBD_BurgundySip[removeBDIndexes], bdTPTable, by = "TP", all.x = T);
+BurgundySip <- rbind(existingBD_BurgundySip, missingBD_BurgundySip);
+```
+
+### Step.2
+
+Treat New TP (White, Rose, Dessert, Fortified)
+
+Solve this task by Multiple Linear Regression Models
+
+```{r}
+missingBD_BurgundySip <- BurgundySip[is.na(BurgundySip$BD),];
+existingBD_BurgundySip <- BurgundySip[!is.na(BurgundySip$BD),];
+bdPredictModel <- lm(BD ~ RSG + AL + YR, data = existingBD_BurgundySip);
+missingBD_BurgundySip$BD <- predict(bdPredictModel, missingBD_BurgundySip);
+missingBD_BurgundySip$BD <- round(missingBD_BurgundySip$BD, 0);
+BurgundySip <- rbind(existingBD_BurgundySip, missingBD_BurgundySip);
+```
+
+## ACD: Acidity score, defined as wine's "pucker" or tartness; it's what makes a wine refreshing and your tongue salivate and want another sip [from 1-5]
+
+### Strategy
+
+```{r}
+# 1. Check the distribution
+table(BurgundySip$ACD);
+#   1    2    3 
+#  34   67 3071 
+# 2. Check the correlation with other variables
+cor(na.omit(BurgundySipNum))[,"ACD"];
+#         RSG           AL           DN           YR 
+# 0.131538949 -0.085149122  0.077349454  0.308731823 
+#         REG           TP           RT         NUMR 
+# 0.005073087 -0.117056631 -0.125947492  0.066169986 
+#          PR           BD          ACD 
+#-0.056487009 -0.077189335  1.000000000 
+```
+
+### Step.1
+
+From the above result, we can find the moderate and weak correlation variables, YR, TP and RT.
+
+And especially the following table explain the perfect relationship.
+
+ACD and TP have a M to 1 relationship.
+
+```{r}
+table(BurgundySip$ACD, BurgundySip$TP);
+acdTPTable <- aggregate(ACD ~ TP, BurgundySip, FUN = mean);
+missingACD_BurgundySip <- BurgundySip[is.na(BurgundySip$ACD),];
+existingACD_BurgundySip <- BurgundySip[!is.na(BurgundySip$ACD),];
+removeACDIndexes <- !(names(BurgundySip) == "ACD");
+missingACD_BurgundySip <- merge(missingACD_BurgundySip[removeACDIndexes], acdTPTable, by = "TP", all.x = T);
+BurgundySip <- rbind(existingACD_BurgundySip, missingACD_BurgundySip);
+```
+
+### Step.2
+
+Treat New TP (White, Rose, Dessert, Fortified)
+
+Solve this task by Multiple Linear Regression Models
+
+```{r}
+missingACD_BurgundySip <- BurgundySip[is.na(BurgundySip$ACD),];
+existingACD_BurgundySip <- BurgundySip[!is.na(BurgundySip$ACD),];
+acdPredictModel <- lm(ACD ~ RSG + YR, data = existingACD_BurgundySip);
+missingACD_BurgundySip$ACD <- predict(acdPredictModel, missingACD_BurgundySip);
+missingACD_BurgundySip$ACD <- round(missingACD_BurgundySip$ACD, 0);
+BurgundySip <- rbind(existingACD_BurgundySip, missingACD_BurgundySip);
+```
+
+# Check the result of cleaning process
+
+```{r}
+# We treat every missing values properly.
+colSums(apply(BurgundySip, 2, FUN = is.na));
+#  SN  RSG   AL   DN NAME WINE   YR  REG   TP   RT NUMR   PR   BD  ACD RT_WEI 
+#   0    0    0    0    0    0    0    0    0    0    0    0    0    0      0
+```
+
+# Descriptive Analysis and Findings
+
+Data Summarization, Visualization, Statistical Analysis, and Calculations
+
+a.  Describe how the calculations were performed and why they had to be performed.
+
+b.  Describe the use of visual artifacts in the analysis.
+
+c.  Explain the findings.
+
+## The exploratory analysis :
+
+1.  Which particular range of age (YR) in regard to wines had the highest price?
+
+2.  Determine the rating range pertaining to the wines which had the highest price.
+
+3.  What is the average price of wines based on the region which the grapes are originated from ?
+
+4.  Calculate the average price of wines based on the name of the aforementioned beverages
+
+5.  The average price of the wines based on the ratings pertinent to each brand.
+
+```{r}
+# 1.Which particular range of age (YR) in regard to wines had the highest price?
+plot(BurgundySip$YR, BurgundySip$PR);
+aggregate(PR ~ YR, data = BurgundySip, FUN = mean);
+plot(aggregate(PR ~ YR, data = BurgundySip, FUN = mean));
+
+# 2.Determine the rating range pertaining to the wines which had the highest price.
+aggregate(PR ~ round(RT, 1), data = BurgundySip, FUN = mean);
+plot(aggregate(PR ~ round(RT, 1), data = BurgundySip, FUN = mean));
+
+# 3.What is the average price of wines based on the region which the grapes are originated from ?
+aggregate(PR ~ REG, data = BurgundySip, FUN = mean);
+plot(aggregate(PR ~ REG, data = BurgundySip, FUN = mean));
+
+# 4.Calculate the average price of wines based on the name of the aforementioned beverages
+aggregate(PR ~ NAME, data = BurgundySip , FUN = mean);
+plot(aggregate(PR ~ NAME, data = BurgundySip , FUN = mean));
+
+# 5.The average price of the wines based on the ratings pertinent to each brand.
+aggregate(PR ~ RT, data = BurgundySip , FUN = mean);
+plot(aggregate(PR ~ RT, data = BurgundySip , FUN = mean));
+```
+
+# Predictive Analysis and Findings
+
+## Generate the Multiple Linear Regression Model
+
+To predict price based on region and rating RT
+
+```{r}
+BurgundySipLM <- lm(PR~RT+REG, data=BurgundySip);
+BurgundySipLM;
+
+summary(BurgundySipLM);
+
+trainIndex <- sample(nrow(BurgundySip), 0.8 * nrow(BurgundySip));
+BurgundySip_train <- BurgundySip[trainIndex, ];
+BurgundySip_test <- BurgundySip[-trainIndex, ];
+```
+
+```{r}
+BurgundySip_LM<- lm(PR~RSG + RT,data=BurgundySip_train);
+BurgundySip_LM;
+
+
+predictPR <- predict(BurgundySip_LM, BurgundySip_test);
+plot(BurgundySip_test$PR, predictPR);
+cor(BurgundySip_test$PR, predictPR);
+```
+
+```{r}
+BurgundySip_LM<- lm(PR~RSG + RT,data=BurgundySip_train);
+BurgundySip_LM;#Residual standard error is 128.7
+
+predictPR <- predict(BurgundySip_LM, BurgundySip_test);
+plot(BurgundySip_test$PR, predictPR);
+cor(BurgundySip_test$PR, predictPR); #COr is 0.5333124
+naIndex <- is.na(predictPR); 
+cor(BurgundySip_test$PR[!naIndex], predictPR[!naIndex]);#COR is 0.5333124
+```
+
+## Generate the Multiple Non-Linear Regression Model
+
+To predict price based on RSG and rating RT
+
+```{r}
+BurgundySip_NLM<- loess(PR~RSG + RT,data=BurgundySip);
+BurgundySip_NLM;
+summary(BurgundySip_NLM);#Residual standard Error is 92
+
+trainIndex <- sample(nrow(BurgundySip), 0.8 * nrow(BurgundySip));
+BurgundySip_train <- BurgundySip[trainIndex, ];
+BurgundySip_test <- BurgundySip[-trainIndex, ];
+```
+
+```{r}
+BurgundySip_NLM<- loess(PR~RSG + RT,data=BurgundySip_train);
+BurgundySip_NLM;#Residual standard error is 81.62
+
+
+predictPR <- predict(BurgundySip_NLM, BurgundySip_test);
+plot(BurgundySip_test$PR, predictPR);
+cor(BurgundySip_test$PR, predictPR);
+```
+
+```{r}
+BurgundySip_NLM<- loess(PR~RSG + RT,data=BurgundySip_train);
+BurgundySip_NLM;#Residual standard error is 81.62
+
+predictPR <- predict(BurgundySip_NLM, BurgundySip_test);
+plot(BurgundySip_test$PR, predictPR);
+cor(BurgundySip_test$PR, predictPR);
+naIndex <- is.na(predictPR);
+cor(BurgundySip_test$PR[!naIndex], predictPR[!naIndex]);
+```
+
+# Cluster-based Analysis and Findings
+
+## Goal
+
+We aim to discover the wines which can be sold at higher unit prices by grouping the wines based on potential relationships.
+
+We achieve these 3 analytical objectives with cluster methods.
+
+1.  Retrieving data regarding the wines which has made the most sales globally.
+
+2.  Which harvest region produces the better wine and consequently higher price.
+
+3.  Brand names of each wine and their impact on wine price.
+
+## Topics
+
+We design Clustering tasks that is meaningful in all Variables except for PR and RT, since they are the target of the evaluation.
+
+According to our global Analytical Objectives, two types of analytical objectives are hypothesized.
+
+### Investigate potential groupings based on taste of Wine, independent of Brand and price, to see if it has an impact on TP and PR.
+
+Wine taste means the sweetness, acidity, and richness that customers experience when they actually taste the wine.
+
+The following five Variables categorize the feeling that customers have when they drink Wine without both the brand and the price. We reveal the potential tastes that our customer prefer.
+
+• BD: Body score, defined as the richness and weight of the wine in your mouth [from 1-5]
+
+• ACD: Acidity score, defined as wine's "pucker" or tartness; it's what makes a wine refreshing and your tongue salivate and want another sip [from 1-5]
+
+• RSG: residual sugar level of the wine [from 0 -16]
+
+• AL: Alcohol percentage of the wine.
+
+• DN: The typical density or specific gravity of the wine is generally between 1.080 and 1.090.
+
+### Investigate potential groupings based on Brand and harvest region of Wine, independent of taste and price, to see if there is an impact on TP and PR.
+
+It generally says that Wine is greatly influenced by brands in terms of price and popularity.
+
+Without using taste and price of Wine, we categorize based on brands to identify the impact of price and popularity.
+
+We hypothesized that the TP and REG in the BurgundySip dataset would be useful in explaining Brand in Wine.
+
+• REG: Region of the wine
+
+• TP: Wine variety
+
+## Preparation
+
+To visualize the cluster classification in this analysis and make it easier to compare visually, we will use ggplot2.
+
+```{r}
+library(ggplot2);
+
+BurgundySip$YR_Num <- as.integer(BurgundySip$YR);
+BurgundySip$REG_Num <- as.integer(BurgundySip$REG);
+BurgundySip$TP_Num <- as.integer(BurgundySip$TP);
+```
+
+## Cluster by Taste
+
+Select a model that can be optimally classified by the 5 Variables that are components of Wine Taste.
+
+Of these five factors, ACD and BD are excluded from the clustering because they do not make a significant difference.
+
+```{r}
+fit <- kmeans(BurgundySip[, c("RSG", "AL", "DN")], 5);
+BurgundySip$TasteCL <- as.factor(fit$cluster);
+
+# visualization
+## 1
+ggplot(BurgundySip, aes(x = DN, bg = TasteCL)) + 
+     geom_bar(position = "fill") +
+     labs(title = "DN by TasteCL");
+## 2
+ggplot(BurgundySip, aes(x = RSG, bg = TasteCL)) + 
+  geom_histogram() +
+  labs(title = "RSG by TasteCL");
+## 3
+ggplot(BurgundySip, aes(x = PR, y = RT, col = TasteCL)) + 
+  geom_point() +
+  labs(title = "PR x RT by TasteCL");
+## 4
+ggplot(BurgundySip, aes(x = TP_Num, bg = TasteCL)) + 
+  geom_bar(position = "fill") +
+  labs(title = "TP by TasteCL");
+```
+
+## Cluster by Brand
+
+Since both REG and TP are factors, convert them to numbers so that they can be used in kmean().
+
+If we simply do as.integer(BurgundySip\$REG), regions that happen to be close in order of REG level will be recognized as highly similar to each other.
+
+One-Hot Encoding method is a method to convert ML input data of common factors.
+
+However, in this case, One-Hot Encoding of REG and TP makes it difficult to obtain each other's features, so we design a column where the REG distribution vector is created for each TP.
+
+```{r}
+# Step 1. Create a relationship matrix between REG and TP.
+REG_TP_Matrix <- table(BurgundySip$REG, BurgundySip$TP);
+heatmap(REG_TP_Matrix);
+
+# Step 2. Convert REG distribution vector by TP to DataFrame.
+columnNams_TP <- paste0("TP_", gsub(" ", "", colnames(REG_TP_Matrix)));
+REG_TP_DataFrame <- data.frame(REG = rownames(REG_TP_Matrix));
+for (col in 1:ncol(REG_TP_Matrix)) {
+  REG_TP_DataFrame[, ncol(REG_TP_DataFrame) + 1] <- as.integer(REG_TP_Matrix[, col] > 0);
+  colnames(REG_TP_DataFrame)[ncol(REG_TP_DataFrame)] <- columnNams_TP[col];
+}
+# Step 3. LeftJoin a REG distribution vector by TP to create a data frame of type Numeric
+BurgundySip <- merge(BurgundySip, REG_TP_DataFrame, by = "REG", all.x = T);
+
+fit <- kmeans(BurgundySip[, columnNams_TP], 10);
+BurgundySip$BrandCL <- as.factor(fit$cluster);
+
+# visualization
+## 1
+ggplot(BurgundySip, aes(x = REG, y = RT_WEI, col = BrandCL)) + 
+  geom_point() +
+  labs(title = "REG x RT_WEI by BrandCL");
+## 2
+ggplot(BurgundySip, aes(x = round(PR, -2), bg = BrandCL)) + 
+  geom_bar(position = "fill") +
+  labs(title = "PR by BrandCL");
+## 3
+ggplot(BurgundySip, aes(x = round(RSG), bg = BrandCL)) + 
+  geom_bar(position = "fill") +
+  labs(title = "RSG by BrandCL");
+## 4
+ggplot(BurgundySip, aes(x = BD, bg = BrandCL)) + 
+  geom_bar(position = "fill") +
+  labs(title = "BD by BrandCL");
+```
+
+## Conclusion
+
+```{r}
+BurgundySip_Conclusion <- aggregate(cbind(PR, RT_WEI) ~ TasteCL + BrandCL, data = BurgundySip, FUN = mean);
+BurgundySip_Conclusion <- BurgundySip_Conclusion[order(BurgundySip_Conclusion$RT_WEI, decreasing = T),];
+View(BurgundySip_Conclusion);
+```
